@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCache, setCache } from "@/app/lib/cache";
-import { fetchText, parseFredCsv } from "@/app/lib/sources";
+import { fredSeries } from "@/app/lib/sources";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +15,7 @@ const SERIES: Record<string, { id: string; label: string; unit: string; mode: "l
 async function one(key: string) {
   const s = SERIES[key];
   try {
-    const t = await fetchText(
-      `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${s.id}`
-    );
-    const rows = parseFredCsv(t);
+    const rows = await fredSeries(s.id, 30);
     if (rows.length < 2) return { key, label: s.label, error: "데이터 없음" };
     const last = rows[rows.length - 1];
     const prev = rows[rows.length - 2];
