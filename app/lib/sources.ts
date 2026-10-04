@@ -111,3 +111,20 @@ export function dday(targetYmd: string): number {
   const target = new Date(y, m - 1, d);
   return Math.round((target.getTime() - t.getTime()) / 86400000);
 }
+
+// FRED 공식 API (api.stlouisfed.org) — Vercel 환경변수 FRED_API_KEY 사용
+export async function fredSeries(
+  id: string,
+  limit = 400
+): Promise<{ date: string; value: number }[]> {
+  const key = process.env.FRED_API_KEY;
+  if (!key) throw new Error("FRED_API_KEY 환경변수가 없습니다");
+  const url =
+    "https://api.stlouisfed.org/fred/series/observations" +
+    `?series_id=${id}&api_key=${key}&file_type=json&sort_order=desc&limit=${limit}`;
+  const j = await fetchJson(url, 12000);
+  return (j.observations || [])
+    .map((o: any) => ({ date: o.date as string, value: parseFloat(o.value) }))
+    .filter((r: { date: string; value: number }) => isFinite(r.value))
+    .reverse(); // 오래된 → 최신 순 (parseFredCsv와 동일한 순서)
+}
