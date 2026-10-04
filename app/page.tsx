@@ -396,7 +396,7 @@ export default function Dashboard() {
       </div>
 
       <div className="note" style={{ marginTop: 30 }}>
-        데이터 제공: Stooq · FRED · Binance · 네이버 금융(KRX 원천) · Google News ·
+        데이터 제공: FRED · Yahoo Finance · Coinbase · 네이버 금융(KRX 원천) · Google News (보조: Stooq · CoinGecko) ·
         금리/옵션/실적 일정은 2026년 공개 일정 기반. 투자 판단의 참고용이며 실시간 체결가와 다를 수 있습니다.
       </div>
     </div>
