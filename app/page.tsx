@@ -176,13 +176,37 @@ export default function Dashboard() {
 
   useEffect(() => {
     refreshAll();
+    let lastFast = Date.now();
+    let lastSlow = Date.now();
+    const runFast = () => {
+      lastFast = Date.now();
+      loadFast();
+    };
+    const runSlow = () => {
+      lastSlow = Date.now();
+      loadSlow();
+    };
     const clock = setInterval(() => setNow(new Date()), 1000);
-    const fast = setInterval(loadFast, 60_000);
-    const slow = setInterval(loadSlow, 600_000);
+    // 탭이 안 보이면(백그라운드·최소화) API를 부르지 않음 → Vercel 사용량 절약
+    const fast = setInterval(() => {
+      if (!document.hidden && Date.now() - lastFast >= 55_000) runFast();
+    }, 60_000);
+    const slow = setInterval(() => {
+      if (!document.hidden && Date.now() - lastSlow >= 590_000) runSlow();
+    }, 600_000);
+    // 탭으로 돌아오면 오래된 데이터만 즉시 갱신
+    const onVisible = () => {
+      if (document.hidden) return;
+      const t = Date.now();
+      if (t - lastFast >= 60_000) runFast();
+      if (t - lastSlow >= 600_000) runSlow();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(clock);
       clearInterval(fast);
       clearInterval(slow);
+      document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -192,7 +216,7 @@ export default function Dashboard() {
       <div className="header">
         <div>
           <h1>투자 대시보드</h1>
-          <div className="sub">시장 지표 60초 자동갱신 · 경제지표/연준발언 10분 자동갱신</div>
+          <div className="sub">시장 지표 60초 자동갱신 · 경제지표/연준발언 10분 자동갱신 · 탭이 안 보이면 일시정지</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <button className="btn" onClick={refreshAll} disabled={spinning}>
