@@ -43,27 +43,98 @@ async function fredRows(id: string): Promise<{ date: string; value: number }[]> 
   }
 }
 
-async function binanceBtc(): Promise<any> {
+// 비트코인: Coinbase(미국 서버에서도 접속 가능) → CoinGecko 백업
+async function btcQuote(): Promise<any> {
+  try {
+    const j = await fetchJson("https://api.exchange.coinbase.com/products/BTC-USD/stats");
+    const last = parseFloat(j.last);
+    const open = parseFloat(j.open);
+    if (!isFinite(last)) throw new Error("no price");
+    return {
+      price: last,
+      changePct: open ? +(((last - open) / open) * 100).toFixed(2) : null,
+      high: parseFloat(j.high),
+      low: parseFloat(j.low),
+      source: "Coinbase (실시간)",
+    };
+  } catch {}
   try {
     const j = await fetchJson(
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true"
     );
     return {
-      price: parseFloat(j.lastPrice),
-      changePct: parseFloat(j.priceChangePercent),
-      high: parseFloat(j.highPrice),
-      low: parseFloat(j.lowPrice),
+      price: j.bitcoin.usd,
+      changePct: +Number(j.bitcoin.usd_24h_change).toFixed(2),
+      high: null,
+      low: null,
+      source: "CoinGecko",
     };
-  } catch {
-    return null;
-  }
+  } catch {}
+  return null;
+}
+
+// 원/달러: Yahoo Finance(시장 환율) → 네이버(하나은행 고시) → FRED DEXKOUS(전일)
+async function usdKrw(): Promise<any> {
+  try {
+    const j = await fetchJson(
+      "https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=2mo&interval=1d"
+    );
+    const r = j.chart.result[0];
+    const m = r.meta;
+    const closes: number[] = (r.indicators.quote[0].close || []).filter(
+      (v: any) => typeof v === "number" && isFinite(v)
+    );
+    const value = Number(m.regularMarketPrice);
+    if (!isFinite(value)) throw new Error("no price");
+    const prev = closes.length >= 2 ? closes[closes.length - 2] : null;
+    return {
+      value: +value.toFixed(2),
+      change: prev ? +(value - prev).toFixed(2) : null,
+      changePct: prev ? +(((value - prev) / prev) * 100).toFixed(2) : null,
+      history: closes.slice(-30),
+      asOf: new Date(m.regularMarketTime * 1000).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+      source: "Yahoo Finance (시장 환율)",
+      unit: "원",
+    };
+  } catch {}
+  try {
+    const j = await fetchJson("https://api.stock.naver.com/marketindex/exchange/FX_USDKRW");
+    const e = j.exchangeInfo;
+    const num = (s: any) => parseFloat(String(s).replace(/,/g, ""));
+    const value = num(e.closePrice);
+    if (!isFinite(value)) throw new Error("no price");
+    return {
+      value,
+      change: num(e.fluctuations),
+      changePct: num(e.fluctuationsRatio),
+      history: [],
+      asOf: e.localTradedAt,
+      source: "네이버 (하나은행 고시)",
+      unit: "원",
+    };
+  } catch {}
+  try {
+    const rows = await fredSeries("DEXKOUS", 60);
+    const last = rows[rows.length - 1];
+    if (!last) throw new Error("no data");
+    return {
+      value: last.value,
+      change: null,
+      changePct: null,
+      history: rows.slice(-30).map((r) => r.value),
+      asOf: last.date,
+      source: "FRED DEXKOUS (전일)",
+      unit: "원",
+    };
+  } catch {}
+  return null;
 }
 
 export async function GET() {
   const cached = getCache<any>("quotes", 60_000);
   if (cached) return NextResponse.json(cached);
 
-  const [q, h10y, hDxy, hKrw, brentRows, dgs10Rows, broadRows, btc] =
+  const [q, h10y, hDxy, hKrw, brentRows, dgs10Rows, broadRows, btc, krw] =
     await Promise.all([
       stooqQuotes(),
       stooqHist("10usy.b"),
@@ -72,7 +143,8 @@ export async function GET() {
       fredRows("DCOILBRENTEU"),
       fredRows("DGS10"),
       fredRows("DTWEXBGS"),
-      binanceBtc(),
+      btcQuote(),
+      usdKrw(),
     ]);
 
   const q10 = q["10usy.b"];
@@ -139,7 +211,9 @@ export async function GET() {
           unit: "$",
         }
       : null,
-    usdkrw: qKrw
+    usdkrw: krw
+      ? krw
+      : qKrw
       ? {
           value: qKrw.close,
           change: +(qKrw.close - qKrw.open).toFixed(2),
@@ -151,7 +225,7 @@ export async function GET() {
         }
       : null,
     btc: btc
-      ? { ...btc, source: "Binance (실시간)", unit: "$" }
+      ? { ...btc, unit: "$" }
       : null,
     updatedAt: new Date().toISOString(),
   };
