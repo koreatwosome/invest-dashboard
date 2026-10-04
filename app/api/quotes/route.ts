@@ -5,7 +5,7 @@ import {
   fetchJson,
   parseStooqQuote,
   parseStooqHistory,
-  parseFredCsv,
+  fredSeries,
 } from "@/app/lib/sources";
 
 export const dynamic = "force-dynamic";
@@ -37,10 +37,7 @@ async function stooqHist(sym: string, days = 45): Promise<number[]> {
 
 async function fredRows(id: string): Promise<{ date: string; value: number }[]> {
   try {
-    const t = await fetchText(
-      `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`
-    );
-    return parseFredCsv(t);
+    return await fredSeries(id, 60);
   } catch {
     return [];
   }
