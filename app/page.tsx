@@ -127,6 +127,31 @@ const QUOTE_CARDS = [
   { key: "usdkrw", title: "원/달러 환율" },
 ];
 
+const ASIA_CARDS = [
+  { key: "nikkei", title: "닛케이 225 (도쿄)" },
+  { key: "taiex", title: "대만 가권지수 (TAIEX)" },
+];
+
+function QuoteCard({ title, d, changeDigits = 3 }: { title: string; d: any; changeDigits?: number }) {
+  if (!d) return <Card title={title}><div className="loading">불러오는 중</div></Card>;
+  const up = (d.change ?? d.changePct ?? 0) >= 0;
+  return (
+    <Card title={title} source={`${d.source} · ${d.asOf}`}>
+      <div className="big">
+        {fmt(d.value, 2)}
+        <span className="unit">{d.unit}</span>
+      </div>
+      <div className={`chg ${up ? "up" : "down"}`}>
+        {d.change !== null && d.change !== undefined ? `${d.change >= 0 ? "+" : ""}${fmt(d.change, changeDigits)}` : "-"}
+        {d.changePct !== null && d.changePct !== undefined
+          ? ` (${d.changePct >= 0 ? "+" : ""}${fmt(d.changePct)}%)`
+          : ""}
+      </div>
+      <Sparkline data={d.history} />
+    </Card>
+  );
+}
+
 export default function Dashboard() {
   const [quotes, setQuotes] = useState<any>(null);
   const [kospi, setKospi] = useState<any>(null);
@@ -144,13 +169,12 @@ export default function Dashboard() {
   }, []);
 
   const loadFast = useCallback(async () => {
-    try {
-      const [q, k] = await Promise.all([getJSON("/api/quotes"), getJSON("/api/kospi")]);
-      setQuotes(q);
-      setKospi(k);
-    } catch (e: any) {
-      setErr(`시세 갱신 실패: ${e.message}`);
-    }
+    // 하나가 실패해도 나머지는 표시되도록 개별 처리
+    const [q, k] = await Promise.allSettled([getJSON("/api/quotes"), getJSON("/api/kospi")]);
+    if (q.status === "fulfilled") setQuotes(q.value);
+    if (k.status === "fulfilled") setKospi(k.value);
+    const fails = [q, k].filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    if (fails.length) setErr(`시세 갱신 실패: ${fails.map((f) => f.reason?.message).join(", ")}`);
   }, [getJSON]);
 
   const loadSlow = useCallback(async () => {
@@ -216,7 +240,7 @@ export default function Dashboard() {
       <div className="header">
         <div>
           <h1>투자 대시보드</h1>
-          <div className="sub">시장 지표 60초 자동갱신 · 경제지표/연준발언 10분 자동갱신 · 탭이 안 보이면 일시정지</div>
+          <div className="sub">시장 지표·아시아 지수 60초 자동갱신 · 경제지표/연준발언 10분 자동갱신 · 탭이 안 보이면 일시정지</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <button className="btn" onClick={refreshAll} disabled={spinning}>
@@ -237,26 +261,9 @@ export default function Dashboard() {
 
       <div className="section-title">시장 지표</div>
       <div className="grid5">
-        {QUOTE_CARDS.map((c) => {
-          const d = quotes?.[c.key];
-          if (!d) return <Card key={c.key} title={c.title}><div className="loading">불러오는 중</div></Card>;
-          const up = (d.change ?? 0) >= 0;
-          return (
-            <Card key={c.key} title={c.title} source={`${d.source} · ${d.asOf}`}>
-              <div className="big">
-                {fmt(d.value, c.key === "usdkrw" ? 2 : 2)}
-                <span className="unit">{d.unit}</span>
-              </div>
-              <div className={`chg ${up ? "up" : "down"}`}>
-                {d.change !== null ? `${d.change >= 0 ? "+" : ""}${fmt(d.change, 3)}` : "-"}
-                {d.changePct !== null && d.changePct !== undefined
-                  ? ` (${d.changePct >= 0 ? "+" : ""}${fmt(d.changePct)}%)`
-                  : ""}
-              </div>
-              <Sparkline data={d.history} />
-            </Card>
-          );
-        })}
+        {QUOTE_CARDS.map((c) => (
+          <QuoteCard key={c.key} title={c.title} d={quotes?.[c.key]} />
+        ))}
         {(() => {
           const d = quotes?.btc;
           if (!d) return <Card title="비트코인 (BTC)"><div className="loading">불러오는 중</div></Card>;
@@ -273,6 +280,27 @@ export default function Dashboard() {
             </Card>
           );
         })()}
+      </div>
+
+      <div className="section-title">아시아 증시 · 메모리 가격</div>
+      <div className="grid3">
+        {ASIA_CARDS.map((c) => (
+          <QuoteCard key={c.key} title={c.title} d={quotes?.[c.key]} changeDigits={2} />
+        ))}
+        <Card title="PC용 D램 DDR4 평균가격" source="DRAMeXchange (TrendForce) · 현물/고정거래가격">
+          <div className="note" style={{ marginTop: 0, marginBottom: 12 }}>
+            DDR4 시세는 DRAMeXchange 공개 페이지에서 확인할 수 있습니다 (공식 API 미제공).
+          </div>
+          <a
+            className="btn"
+            href="https://www.dramexchange.com/"
+            target="_blank"
+            rel="noreferrer"
+            style={{ display: "inline-block", textDecoration: "none" }}
+          >
+            DRAMeXchange에서 DDR4 가격 보기 ↗
+          </a>
+        </Card>
       </div>
 
       <div className="section-title">코스피 월봉</div>
@@ -396,7 +424,7 @@ export default function Dashboard() {
       </div>
 
       <div className="note" style={{ marginTop: 30 }}>
-        데이터 제공: FRED · Yahoo Finance · Coinbase · 네이버 금융(KRX 원천) · Google News (보조: Stooq · CoinGecko) ·
+        데이터 제공: FRED · Yahoo Finance · Coinbase · 네이버 금융(KRX 원천·해외지수) · Google News (보조: Stooq · CoinGecko) ·
         금리/옵션/실적 일정은 2026년 공개 일정 기반. 투자 판단의 참고용이며 실시간 체결가와 다를 수 있습니다.
       </div>
     </div>
