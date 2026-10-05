@@ -130,11 +130,62 @@ async function usdKrw(): Promise<any> {
   return null;
 }
 
+// 아시아 지수: Yahoo Finance(지연 시세 + 30일 히스토리) → 네이버 해외지수(15~20분 지연) 백업
+async function asiaIndex(yahooSym: string, naverSym: string): Promise<any> {
+  try {
+    const j = await fetchJson(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}?range=2mo&interval=1d`
+    );
+    const r = j.chart.result[0];
+    const m = r.meta;
+    const value = Number(m.regularMarketPrice);
+    if (!isFinite(value)) throw new Error("no price");
+    const ts: number[] = r.timestamp || [];
+    const raw: any[] = r.indicators.quote[0].close || [];
+    const tz = m.exchangeTimezoneName || "UTC";
+    const day = (sec: number) =>
+      new Date(sec * 1000).toLocaleDateString("en-CA", { timeZone: tz });
+    const today = day(m.regularMarketTime);
+    const pts = ts
+      .map((t, i) => ({ d: day(t), c: raw[i] }))
+      .filter((x) => typeof x.c === "number" && isFinite(x.c));
+    // 전일 종가 = 현재 거래일 이전의 마지막 종가
+    const prevPts = pts.filter((x) => x.d < today);
+    const prev = prevPts.length ? prevPts[prevPts.length - 1].c : null;
+    const hist = [...prevPts.map((x) => x.c), value];
+    return {
+      value: +value.toFixed(2),
+      change: prev ? +(value - prev).toFixed(2) : null,
+      changePct: prev ? +(((value - prev) / prev) * 100).toFixed(2) : null,
+      history: hist.slice(-30),
+      asOf: new Date(m.regularMarketTime * 1000).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+      source: "Yahoo Finance (지연 시세)",
+      unit: "pt",
+    };
+  } catch {}
+  try {
+    const j = await fetchJson(`https://api.stock.naver.com/index/${naverSym}/basic`);
+    const num = (s: any) => parseFloat(String(s).replace(/,/g, ""));
+    const value = num(j.closePriceRaw ?? j.closePrice);
+    if (!isFinite(value)) throw new Error("no price");
+    return {
+      value,
+      change: num(j.compareToPreviousClosePriceRaw ?? j.compareToPreviousClosePrice),
+      changePct: num(j.fluctuationsRatioRaw ?? j.fluctuationsRatio),
+      history: [],
+      asOf: new Date(j.localTradedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }),
+      source: `네이버 (${j.delayTimeName || "지연"})`,
+      unit: "pt",
+    };
+  } catch {}
+  return null;
+}
+
 export async function GET() {
   const cached = getCache<any>("quotes", 60_000);
   if (cached) return NextResponse.json(cached);
 
-  const [q, h10y, hDxy, hKrw, brentRows, dgs10Rows, broadRows, btc, krw] =
+  const [q, h10y, hDxy, hKrw, brentRows, dgs10Rows, broadRows, btc, krw, nikkei, taiex] =
     await Promise.all([
       stooqQuotes(),
       stooqHist("10usy.b"),
@@ -145,6 +196,8 @@ export async function GET() {
       fredRows("DTWEXBGS"),
       btcQuote(),
       usdKrw(),
+      asiaIndex("^N225", ".N225"),
+      asiaIndex("^TWII", ".TWII"),
     ]);
 
   const q10 = q["10usy.b"];
@@ -227,6 +280,8 @@ export async function GET() {
     btc: btc
       ? { ...btc, unit: "$" }
       : null,
+    nikkei,
+    taiex,
     updatedAt: new Date().toISOString(),
   };
 
